@@ -36,10 +36,10 @@ const App = () =>
 
                     <Route path="/apps" element={<AppsHub />} />
 
-                    <Route path="/apps/etics/processes" element={<Processes />} />
-                    <Route path="/apps/etics/processes/:id" element={<ProcessView />} />
-                    <Route path="/apps/etics/processes/new" element={<NewProcess />} />
-                    <Route path="/apps/etics/admin" element={<Admin />} />
+                    <Route path="/apps/analise-de-processos/processes" element={<Processes />} />
+                    <Route path="/apps/analise-de-processos/processes/:id" element={<ProcessView />} />
+                    <Route path="/apps/analise-de-processos/processes/new" element={<NewProcess />} />
+                    <Route path="/apps/analise-de-processos/admin" element={<Admin />} />
 
                     <Route path="/settings" element={<Settings />} />
 

@@ -24,10 +24,7 @@ app.use(cors());
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Rotas públicas
 app.use("/api/auth", authRoutes);
-
-// Rotas autenticadas
 app.use("/api/config", configRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/processes", processRoutes);

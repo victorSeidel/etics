@@ -1,4 +1,4 @@
-## 2. Instalar e Configurar Redis
+## Instalar e Configurar Redis
 
 O Bull requer Redis para funcionar. Instale o Redis:
 
@@ -21,19 +21,13 @@ sudo apt-get install redis-server
 sudo systemctl start redis
 ```
 
-### Docker (Alternativa mais fácil):
-```bash
-docker run -d -p 6379:6379 redis:alpine
-```
-```
-
-## 4. Executar Migrations do Banco de Dados
+## Executar Migrations do Banco de Dados
 
 ```bash
 node server/runMigrations.js
 ```
 
-## 5. Iniciar o Worker de Processamento OCR
+## Iniciar o Worker de Processamento OCR
 
 O worker precisa rodar em um processo separado do servidor principal:
 
@@ -47,7 +41,7 @@ node server/workers/ocrWorker.js
 
 **IMPORTANTE**: O worker deve estar sempre rodando para processar PDFs!
 
-## 6. Configuração em Produção (VPS)
+## Configuração em Produção (VPS)
 
 ### Usando PM2:
 
@@ -60,7 +54,6 @@ npm install -g pm2
 
 Crie `ecosystem.config.js`:
 
-```javascript
 module.exports = {
   apps: [
     {
@@ -84,21 +77,17 @@ module.exports = {
     }
   ]
 };
-```
 
 Iniciar com PM2:
 
-```bash
 pm2 start ecosystem.config.js
 pm2 save
 pm2 startup
-```
 
-## 9. Testar o Sistema
+## Testar o Sistema
 
-```bash
 # 1. Inicie o Redis
-docker run -d -p 6379:6379 redis:alpine
+
 
 # 2. Execute as migrations
 node server/runMigrations.js
@@ -108,23 +97,3 @@ node server/app.js
 
 # 4. Em outro terminal, inicie o worker
 node server/workers/ocrWorker.js
-
-# 5. Teste com curl ou Postman
-curl -X POST http://localhost:3000/api/processes \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"test-user","name":"Teste"}'
-```
-
-## 10. Monitoramento
-
-### Ver jobs na fila:
-```bash
-# Instalar Bull Board (opcional - interface web)
-npm install @bull-board/express @bull-board/api
-```
-
-### Logs do PM2:
-```bash
-pm2 logs etics-ocr-worker
-pm2 logs etics-api
-```

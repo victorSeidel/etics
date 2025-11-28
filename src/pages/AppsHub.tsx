@@ -3,6 +3,8 @@ import { useUser } from "@/hooks/use-user";
 
 import { FileText, Settings, LogOut } from "lucide-react";
 
+import { Logo } from "@/components/Logo"
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -46,10 +48,10 @@ const AppsHub = () =>
     const apps = 
     [
         {
-            name: "ETICS",
+            name: "Análise de Processos",
             description: "Análise inteligente de processos jurídicos com IA",
             icon: <FileText className="h-6 w-6 text-accent" />,
-            href: "/apps/etics/processes",
+            href: "/apps/analise-de-processos/processes",
             color: "border-l-accent",
             functional: true
         }
@@ -59,9 +61,8 @@ const AppsHub = () =>
         <div className="min-h-screen bg-background">
             <header className="border-b border-border bg-card">
                 <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <FileText className="h-6 w-6 text-accent" />
-                        <span className="text-xl font-semibold">Hub de Aplicações</span>
+                    <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
+                        <Logo width={150} />
                     </div>
                     <div className="flex items-center gap-4">
                         <Button variant="ghost" size="icon" onClick={() => navigate("/settings")}>

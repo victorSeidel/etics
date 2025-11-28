@@ -148,33 +148,7 @@ const Settings = () =>
 
     return (
         <div className="min-h-screen bg-background">
-            <header className="border-b border-border bg-card">
-                <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-8">
-                        <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/apps")}>
-                            <FileText className="h-6 w-6 text-accent" />
-                            <span className="text-xl font-semibold">ETICS</span>
-                        </div>
-                        <nav className="hidden md:flex items-center gap-6">
-                            <button
-                                onClick={() => navigate("/apps/etics/processes")}
-                                className="text-sm font-medium text-foreground hover:text-primary transition-colors"
-                            >
-                                Processos
-                            </button>
-                            {user.role === "admin" && (
-                                <button
-                                onClick={() => navigate("/apps/etics/admin")}
-                                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                                >
-                                Admin
-                                </button>
-                            )}
-                        </nav>
-                    </div>
-                    <Header/>
-                </div>
-            </header>
+            <Header/>
 
             <main className="container mx-auto px-6 py-8 flex flex-col items-center">
                 <Button variant="ghost" className="mb-6 gap-2" onClick={() => navigate("/apps")}>

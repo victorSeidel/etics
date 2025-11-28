@@ -1,5 +1,7 @@
 import Queue from 'bull';
 
+const JOB_TYPE = 'pdf-ocr';
+
 const redisConfig = 
 {
     host: process.env.REDIS_HOST || 'localhost',
@@ -23,29 +25,14 @@ export const pdfQueue = new Queue('pdf-processing',
     },
 });
 
-pdfQueue.on('active', (job) => 
-{
-    console.log(`[Queue] Job ${job.id} iniciado - PDF: ${job.data.filename}`);
-});
-
-pdfQueue.on('completed', (job, result) =>
-{
-    console.log(`[Queue] Job ${job.id} concluído - PDF: ${job.data.filename}`);
-});
-
-pdfQueue.on('failed', (job, err) => 
-{
-    console.error(`[Queue] Job ${job.id} falhou - PDF: ${job.data.filename}`, err.message);
-});
-
-pdfQueue.on('stalled', (job) => 
-{
-    console.warn(`[Queue] Job ${job.id} travado - PDF: ${job.data.filename}`);
-});
+pdfQueue.on('active', (job) => { console.log(`[Queue] Job ${job.id} iniciado - PDF: ${job.data.filename}`); });
+pdfQueue.on('completed', (job) => { console.log(`[Queue] Job ${job.id} concluído - PDF: ${job.data.filename}`); });
+pdfQueue.on('failed', (job, err) => { console.error(`[Queue] Job ${job.id} falhou - PDF: ${job.data.filename}`, err.message); });
+pdfQueue.on('stalled', (job) => { console.warn(`[Queue] Job ${job.id} travado - PDF: ${job.data.filename}`); });
 
 export async function addPdfToQueue(pdfData) 
 {
-    const job = await pdfQueue.add(pdfData, 
+    const job = await pdfQueue.add(JOB_TYPE, pdfData, 
     {
         priority: pdfData.priority || 5,
         jobId: pdfData.pdfId,
@@ -83,6 +70,19 @@ export async function cleanQueue()
     await pdfQueue.clean(24 * 3600 * 1000, 'completed');
     await pdfQueue.clean(7 * 24 * 3600 * 1000, 'failed');
     console.log('[Queue] Fila limpa');
+}
+
+export async function retryFailedJobs() 
+{
+    const failedJobs = await pdfQueue.getFailed();
+    
+    for (const job of failedJobs) 
+    {
+        console.log(`Reprocessando job falhado: ${job.id}`);
+        await job.retry();
+    }
+    
+    console.log(`[Queue] ${failedJobs.length} jobs falhados reprocessados`);
 }
 
 process.on('SIGTERM', async () => 

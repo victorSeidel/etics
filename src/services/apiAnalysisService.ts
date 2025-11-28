@@ -7,13 +7,16 @@ export interface Analysis {
     processId: string;
     userId: string;
     type: 'geral' | 'focada';
-    focusTarget?: string;
-    focusType?: 'advogado' | 'reu';
+    focusAdvogado?: string;
+    focusReu?: string;
     content: string;
     status: 'gerando' | 'concluida' | 'erro';
     errorMessage?: string;
     tokensUsed?: number;
     modelUsed?: string;
+    progress?: number;
+    totalSteps?: number;
+    statusMessage?: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -22,8 +25,8 @@ export interface GenerateAnalysisRequest {
     processId: string;
     userId: string;
     type: 'geral' | 'focada';
-    focusTarget?: string;
-    focusType?: 'advogado' | 'reu';
+    focusAdvogado?: string;
+    focusReu?: string;
 }
 
 export interface AnalysisAvailability {

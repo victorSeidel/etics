@@ -1,9 +1,12 @@
 import { pdfQueue } from '../services/queueService.js';
 import { processPdf } from '../services/ocrService.js';
 
+const JOB_TYPE = 'pdf-ocr';
+const MAX_WORKERS = parseInt(process.env.OCR_WORKERS, 10) || 8;
+
 console.log('[Worker] Iniciando OCR Worker...');
 
-pdfQueue.process(async (job) =>
+pdfQueue.process(JOB_TYPE, MAX_WORKERS, async (job) =>
 {
     console.log(`[Worker] Processando job ${job.id}`);
 

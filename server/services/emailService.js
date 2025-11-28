@@ -1,244 +1,183 @@
 import createTransporter from '../utils/email.js';
 
-export const sendPasswordResetEmail = async (email, name, newPassword) => 
-{
-    try 
-    {
+const getEmailTemplate = (title, content, actionUrl, actionText) => `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            line-height: 1.6; 
+            color: #333; 
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container { 
+            max-width: 600px; 
+            margin: 20px auto; 
+            background: #ffffff; 
+            border-radius: 8px; 
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .header { 
+            background-color: #ffffff; 
+            padding: 30px 20px; 
+            text-align: center; 
+            border-bottom: 3px solid #293366;
+        }
+        .content { 
+            padding: 40px 30px; 
+        }
+        h1 {
+            color: #293366;
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        p {
+            margin-bottom: 15px;
+            color: #555;
+        }
+        .button-container {
+            text-align: center;
+            margin: 30px 0;
+        }
+        .button {
+            display: inline-block;
+            background: linear-gradient(90deg, #293366 0%, #E23232 100%);
+            color: white !important;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .footer { 
+            background-color: #f9f9f9;
+            padding: 20px; 
+            text-align: center; 
+            color: #888; 
+            font-size: 12px;
+            border-top: 1px solid #eee;
+        }
+        .highlight-box {
+            background: #f0f2f5;
+            border-left: 4px solid #293366;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="${process.env.APP_URL}/logo.png" alt="ETICS Logo" height="50" style="display: block; margin: 0 auto;">
+        </div>
+        <div class="content">
+            <h1>${title}</h1>
+            ${content}
+            ${actionUrl ? `
+            <div class="button-container">
+                <a href="${actionUrl}" class="button">${actionText}</a>
+            </div>
+            ` : ''}
+            <p>Atenciosamente,<br><strong>Equipe ${process.env.EMAIL_FROM_NAME}</strong></p>
+        </div>
+        <div class="footer">
+            <p>Este é um e-mail automático, por favor não responda.</p>
+            <p>© ${new Date().getFullYear()} ${process.env.EMAIL_FROM_NAME}. Todos os direitos reservados.</p>
+        </div>
+    </div>
+</body>
+</html>
+`;
+
+export const sendPasswordResetEmail = async (email, name, newPassword) => {
+    try {
         const transporter = await createTransporter();
-
         const subject = 'Redefinição de Senha - ETICS';
-        
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <style>
-                    body { 
-                        font-family: Arial, sans-serif; 
-                        line-height: 1.6; 
-                        color: #333; 
-                        max-width: 600px; 
-                        margin: 0 auto; 
-                        padding: 20px;
-                    }
-                    .header { 
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                        color: white; 
-                        padding: 30px; 
-                        text-align: center; 
-                        border-radius: 10px 10px 0 0;
-                    }
-                    .content { 
-                        background: #f9f9f9; 
-                        padding: 30px; 
-                        border-radius: 0 0 10px 10px;
-                        border: 1px solid #e0e0e0;
-                    }
-                    .password-box { 
-                        background: #fff; 
-                        padding: 15px; 
-                        border: 2px dashed #667eea; 
-                        border-radius: 5px; 
-                        text-align: center; 
-                        margin: 20px 0; 
-                        font-size: 18px; 
-                        font-weight: bold;
-                    }
-                    .warning { 
-                        background: #fff3cd; 
-                        border: 1px solid #ffeaa7; 
-                        padding: 15px; 
-                        border-radius: 5px; 
-                        margin: 20px 0;
-                        color: #856404;
-                    }
-                    .footer { 
-                        text-align: center; 
-                        margin-top: 30px; 
-                        color: #666; 
-                        font-size: 14px;
-                    }
-                    .button {
-                        display: inline-block;
-                        background: #667eea;
-                        color: white;
-                        padding: 12px 30px;
-                        text-decoration: none;
-                        border-radius: 5px;
-                        margin: 10px 0;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <h1>Redefinição de Senha</h1>
-                </div>
-                <div class="content">
-                    <h2>Olá, ${name}!</h2>
-                    
-                    <p>Recebemos uma solicitação para redefinir sua senha. Sua senha temporária foi gerada com sucesso.</p>
-                    
-                    <div class="password-box">
-                        🔒 Senha Temporária:<br>
-                        <strong>${newPassword}</strong>
-                    </div>
-                    
-                    <p>Utilize esta senha para fazer login no sistema. Recomendamos que você altere esta senha após o primeiro acesso.</p>
-                    
-                    <div style="text-align: center;">
-                        <a href="${process.env.APP_URL}/login" class="button">
-                            Fazer Login Agora
-                        </a>
-                    </div>
-                    
-                    <div class="warning">
-                        <strong>⚠️ Importante:</strong>
-                        <ul>
-                            <li>Esta é uma senha temporária</li>
-                            <li>Altere sua senha após o primeiro acesso</li>
-                            <li>Não compartilhe sua senha com ninguém</li>
-                            <li>Se você não solicitou esta redefinição, ignore este e-mail</li>
-                        </ul>
-                    </div>
-                    
-                    <p>Atenciosamente,<br>
-                    <strong>Equipe ${process.env.EMAIL_FROM_NAME}</strong></p>
-                </div>
-                <div class="footer">
-                    <p>Este é um e-mail automático, por favor não responda.</p>
-                    <p>© ${new Date().getFullYear()} ${process.env.EMAIL_FROM_NAME}. Todos os direitos reservados.</p>
-                </div>
-            </body>
-            </html>
+
+        const content = `
+            <p>Olá, ${name}!</p>
+            <p>Recebemos uma solicitação para redefinir sua senha. Sua senha temporária foi gerada com sucesso.</p>
+            
+            <div class="highlight-box" style="text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 2px;">
+                ${newPassword}
+            </div>
+            
+            <p>Utilize esta senha para fazer login no sistema. <strong>Recomendamos fortemente que você altere esta senha após o primeiro acesso.</strong></p>
+            
+            <p style="font-size: 13px; color: #666;">Se você não solicitou esta redefinição, por favor ignore este e-mail ou entre em contato com o suporte.</p>
         `;
 
-        const text = `
-            Redefinição de Senha - ${process.env.EMAIL_FROM_NAME}
-            
-            Olá, ${name}!
-            
-            Recebemos uma solicitação para redefinir sua senha. Sua nova senha temporária foi gerada com sucesso.
-            
-            Nova Senha Temporária: ${newPassword}
-            
-            Utilize esta senha para fazer login no sistema. Recomendamos que você altere esta senha após o primeiro acesso.
-            
-            Acesse: ${process.env.APP_URL}/login
-            
-            Importante:
-            - Esta é uma senha temporária
-            - Altere sua senha após o primeiro acesso
-            - Não compartilhe sua senha com ninguém
-            - Se você não solicitou esta redefinição, ignore este e-mail
-            
-            Atenciosamente,
-            Equipe ${process.env.EMAIL_FROM_NAME}
-            
-            Este é um e-mail automático, por favor não responda.
-        `;
+        const html = getEmailTemplate('Redefinição de Senha', content, `${process.env.APP_URL}/login`, 'Fazer Login Agora');
 
-        const mailOptions = { from: { name: process.env.EMAIL_FROM_NAME, address: process.env.EMAIL_USER }, to: email, subject: subject, text: text, html: html };
+        const text = `Olá ${name}, sua nova senha temporária é: ${newPassword}. Acesse ${process.env.APP_URL}/login para entrar.`;
+
+        const mailOptions = { from: { name: process.env.EMAIL_FROM_NAME, address: process.env.EMAIL_USER }, to: email, subject, text, html };
 
         const result = await transporter.sendMail(mailOptions);
-        
         console.log(`[E-MAIL] Email de redefinição enviado para ${email}:`, result.messageId);
         return { success: true, messageId: result.messageId };
-        
-    } 
-    catch (error) 
-    {
+    }
+    catch (error) {
         console.error('[E-MAIL] Erro ao enviar email de redefinição:', error);
         throw new Error('Falha ao enviar email de redefinição de senha');
     }
 };
 
-export const sendProcessCompletedEmail = async (email, name, processId, filename) => 
-{
-    try 
-    {
+export const sendProcessCompletedEmail = async (email, name, processId) => {
+    try {
         const transporter = await createTransporter();
-
         const subject = 'Processamento de PDF Concluído - ETICS';
-        
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <style>
-                    body {
-                        font-family: Arial, sans-serif;
-                        background: #f7f9fc;
-                        padding: 20px;
-                        color: #333;
-                        line-height: 1.6;
-                    }
-                    .container {
-                        background: white;
-                        border-radius: 10px;
-                        padding: 30px;
-                        border: 1px solid #eee;
-                        max-width: 600px;
-                        margin: 0 auto;
-                    }
-                    h1 {
-                        color: #4a56e2;
-                    }
-                    .button {
-                        display: inline-block;
-                        background: #4a56e2;
-                        color: white;
-                        padding: 12px 25px;
-                        border-radius: 6px;
-                        text-decoration: none;
-                        margin-top: 20px;
-                    }
-                    .footer {
-                        text-align: center;
-                        margin-top: 30px;
-                        color: #666;
-                        font-size: 14px;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h1>Seu PDF foi processado com sucesso!</h1>
-                    <p>Olá, ${name}!</p>
-                    <p>O arquivo <strong>${filename}</strong> foi totalmente processado e está disponível no sistema.</p>
-                    <p>Você pode acessar o resultado completo clicando no botão abaixo:</p>
-                    <div style="text-align:center;">
-                        <a href="${process.env.APP_URL}/processos/${processId}" class="button">Ver Resultado</a>
-                    </div>
-                    <p>Atenciosamente,<br><strong>Equipe ${process.env.EMAIL_FROM_NAME}</strong></p>
-                </div>
-                <div class="footer">
-                    <p>Este é um e-mail automático, por favor não responda.</p>
-                    <p>© ${new Date().getFullYear()} ${process.env.EMAIL_FROM_NAME}</p>
-                </div>
-            </body>
-            </html>
+
+        const content = `
+            <p>Olá, ${name}!</p>
+            <p>Temos boas notícias! Seu arquivo PDF foi totalmente processado e a análise já está disponível no sistema.</p>
+            <p>Nossa IA identificou e extraiu as informações relevantes do seu documento com sucesso.</p>
         `;
 
-        const text = `
-            Olá, ${name}!
+        const html = getEmailTemplate('PDF Processado com Sucesso', content, `${process.env.APP_URL}/apps/analise-de-processos/processes/${processId}`, 'Ver Resultado da Análise');
 
-            O arquivo ${filename} foi processado com sucesso e está disponível em:
-            ${process.env.APP_URL}/processos/${processId}
-
-            Atenciosamente,
-            Equipe ${process.env.EMAIL_FROM_NAME}
-        `;
+        const text = `Olá ${name}, seu PDF foi processado com sucesso. Acesse: ${process.env.APP_URL}/apps/analise-de-processos/processes/${processId}`;
 
         const mailOptions = { from: { name: process.env.EMAIL_FROM_NAME, address: process.env.EMAIL_USER }, to: email, subject, text, html };
 
         const result = await transporter.sendMail(mailOptions);
         console.log(`[E-MAIL] E-mail de conclusão enviado para ${email}: ${result.messageId}`);
         return { success: true, messageId: result.messageId };
-    } 
-    catch (error) 
-    {
+    }
+    catch (error) {
+        console.error('[E-MAIL] Erro ao enviar email de conclusão:', error);
+    }
+};
+
+export const sendAnalysisCompletedEmail = async (email, name) => {
+    try {
+        const transporter = await createTransporter();
+        const subject = 'Análise de Processo Concluída - ETICS';
+
+        const content = `
+            <p>Olá, ${name}!</p>
+            <p>Sua análise de processo foi finalizada com sucesso.</p>
+            <p>Você já pode consultar todos os detalhes, insights e dados extraídos diretamente na plataforma.</p>
+        `;
+
+        const html = getEmailTemplate('Análise Finalizada', content, `${process.env.APP_URL}/apps/analise-de-processos/processes`, 'Acessar Meus Processos');
+
+        const text = `Olá ${name}, sua análise foi concluída. Acesse: ${process.env.APP_URL}/apps/analise-de-processos/processes`;
+
+        const mailOptions = { from: { name: process.env.EMAIL_FROM_NAME, address: process.env.EMAIL_USER }, to: email, subject, text, html };
+
+        const result = await transporter.sendMail(mailOptions);
+        console.log(`[E-MAIL] E-mail de conclusão enviado para ${email}: ${result.messageId}`);
+        return { success: true, messageId: result.messageId };
+    }
+    catch (error) {
         console.error('[E-MAIL] Erro ao enviar email de conclusão:', error);
     }
 };

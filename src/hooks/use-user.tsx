@@ -28,11 +28,7 @@ export function useUser()
     {
         try
         {
-            const response = await fetch(`${API_URL}/api/auth/me`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
+            const response = await fetch(`${API_URL}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
 
             if (!response.ok)
             {

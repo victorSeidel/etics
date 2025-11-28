@@ -1,99 +1,17 @@
 import OpenAI from 'openai';
 import { pool } from '../db.js';
+import { searchSimilarChunks, getEmbeddingStats } from './embeddingService.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const MAX_CONTEXT_WORDS = 4000; // Limite de palavras de contexto por mensagem
-const SIMILARITY_THRESHOLD = 0.3; // Threshold mínimo de similaridade (ajustável)
+const MAX_CONTEXT_WORDS = 4000;
+const SEMANTIC_SEARCH_LIMIT = 5;
+const MIN_SIMILARITY_THRESHOLD = 0.5;
 
-function calculateSimpleSimilarity(query, text) 
-{
-    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-    const textLower = text.toLowerCase();
-
-    let matchCount = 0;
-    for (const word of queryWords) 
-    {
-        if (textLower.includes(word)) 
-        {
-            matchCount++;
-        }
-    }
-
-    return matchCount / Math.max(queryWords.length, 1);
-}
-
-function extractRelevantContext(query, fullText, maxWords = MAX_CONTEXT_WORDS) 
-{
-    // Divide o texto em parágrafos/seções
-    const sections = fullText.split(/\n\n+/).filter(s => s.trim().length > 50);
-
-    if (sections.length === 0) return fullText.split(/\s+/).slice(0, maxWords).join(' ');
-
-    // Calcula similaridade de cada seção com a query
-    const scoredSections = sections.map(section => ({ text: section, score: calculateSimpleSimilarity(query, section), wordCount: section.split(/\s+/).length }));
-
-    // Ordena por score (mais relevante primeiro)
-    scoredSections.sort((a, b) => b.score - a.score);
-
-    // Seleciona seções mais relevantes até atingir o limite de palavras
-    const selectedSections = [];
-    let totalWords = 0;
-
-    for (const section of scoredSections) 
-    {
-        if (section.score < SIMILARITY_THRESHOLD)
-        {
-            break; // Para quando a relevância é muito baixa
-        }
-
-        if (totalWords + section.wordCount <= maxWords) 
-        {
-            selectedSections.push(section);
-            totalWords += section.wordCount;
-        }
-
-        if (totalWords >= maxWords) 
-        {
-            break;
-        }
-    }
-
-    // Se não encontrou nada relevante, pega as primeiras seções até o limite
-    if (selectedSections.length === 0) 
-    {
-        let words = 0;
-        for (const section of sections) 
-        {
-            if (words + section.wordCount <= maxWords) 
-            {
-                selectedSections.push(section);
-                words += section.wordCount;
-            } 
-            else 
-            {
-                break;
-            }
-        }
-    }
-
-    // Reordena as seções selecionadas pela ordem original no documento
-    const originalOrder = selectedSections.sort((a, b) => 
-    {
-        const indexA = fullText.indexOf(a.text);
-        const indexB = fullText.indexOf(b.text);
-        return indexA - indexB;
-    });
-
-    return originalOrder.map(s => s.text).join('\n\n');
-}
-
-export async function createConversation({ processId, userId, title = 'Nova Conversa' }) 
-{
+export async function createConversation({ processId, userId, title = 'Nova Conversa' }) {
     const client = await pool.connect();
 
-    try 
-    {
+    try {
         // Verifica se o processo existe e pertence ao usuário
         const processResult = await client.query(
             'SELECT * FROM processes WHERE id = $1 AND user_id = $2',
@@ -132,19 +50,16 @@ export async function createConversation({ processId, userId, title = 'Nova Conv
 
         return result.rows[0];
 
-    } 
-    finally 
-    {
+    }
+    finally {
         client.release();
     }
 }
 
-export async function listConversations({ processId, userId }) 
-{
+export async function listConversations({ processId, userId }) {
     const client = await pool.connect();
 
-    try
-    {
+    try {
         const result = await client.query(
             `SELECT id, process_id, user_id, title, message_count, created_at, updated_at
              FROM process_conversations
@@ -155,19 +70,16 @@ export async function listConversations({ processId, userId })
 
         return result.rows;
 
-    } 
-    finally 
-    {
+    }
+    finally {
         client.release();
     }
 }
 
-export async function getConversation({ conversationId, userId }) 
-{
+export async function getConversation({ conversationId, userId }) {
     const client = await pool.connect();
 
-    try 
-    {
+    try {
         // Busca a conversa
         const convResult = await client.query(
             `SELECT c.*, p.name as process_name
@@ -195,19 +107,16 @@ export async function getConversation({ conversationId, userId })
             messages: messagesResult.rows
         };
 
-    } 
-    finally 
-    {
+    }
+    finally {
         client.release();
     }
 }
 
-export async function renameConversation({ conversationId, userId, newTitle }) 
-{
+export async function renameConversation({ conversationId, userId, newTitle }) {
     const client = await pool.connect();
 
-    try 
-    {
+    try {
         const result = await client.query(
             `UPDATE process_conversations
              SET title = $1
@@ -222,19 +131,16 @@ export async function renameConversation({ conversationId, userId, newTitle })
 
         return result.rows[0];
 
-    } 
-    finally 
-    {
+    }
+    finally {
         client.release();
     }
 }
 
-export async function deleteConversation({ conversationId, userId }) 
-{
+export async function deleteConversation({ conversationId, userId }) {
     const client = await pool.connect();
 
-    try 
-    {
+    try {
         const result = await client.query(
             `DELETE FROM process_conversations
              WHERE id = $1 AND user_id = $2
@@ -248,22 +154,18 @@ export async function deleteConversation({ conversationId, userId })
 
         return { success: true };
 
-    } 
-    finally 
-    {
+    }
+    finally {
         client.release();
     }
 }
 
-export async function sendMessage({ conversationId, userId, message }) 
-{
+export async function sendMessage({ conversationId, userId, message }) {
     const client = await pool.connect();
 
-    try 
-    {
+    try {
         await client.query('BEGIN');
 
-        // Verifica se a conversa existe e pertence ao usuário
         const convResult = await client.query(
             `SELECT c.*, p.id as process_id, p.name as process_name, p.lawyer, p.defendants
              FROM process_conversations c
@@ -313,26 +215,63 @@ export async function sendMessage({ conversationId, userId, message })
 
         const messageHistory = historyResult.rows.reverse(); // Ordem cronológica
 
-        // Busca os textos extraídos dos PDFs
-        const pdfsResult = await client.query(
-            `SELECT original_filename, extracted_text
-             FROM process_pdfs
-             WHERE process_id = $1 AND status = 'concluido' AND extracted_text IS NOT NULL
-             ORDER BY processing_order`,
-            [conversation.process_id]
-        );
+        // Verifica se o processo tem embeddings gerados
+        const embeddingStats = await getEmbeddingStats(conversation.process_id);
 
-        if (pdfsResult.rows.length === 0) {
-            throw new Error('Nenhum texto extraído encontrado para o processo');
+        if (embeddingStats.withoutEmbedding > 0) {
+            console.log(`[CHAT] Aviso: ${embeddingStats.withoutEmbedding} PDFs sem embeddings no processo ${conversation.process_id}`);
+        }
+        if (embeddingStats.withEmbedding === 0) {
+            throw new Error('Nenhum embedding encontrado para o processo. Por favor, aguarde o processamento completo dos documentos.');
         }
 
-        // Combina todos os textos dos PDFs
-        const fullText = pdfsResult.rows
-            .map((pdf, index) => `\n\n=== DOCUMENTO ${index + 1}: ${pdf.original_filename} ===\n\n${pdf.extracted_text}`)
-            .join('\n');
+        // Busca chunks similares usando busca semântica vetorial
+        console.log(`[CHAT] Buscando contexto relevante usando busca semântica...`);
+        console.log(`[CHAT] PDFs com embeddings: ${embeddingStats.withEmbedding}/${embeddingStats.totalPdfs}`);
+        console.log(`[CHAT] Total de chunks disponíveis: ${embeddingStats.totalChunks}`);
+        console.log(`[CHAT] Threshold de similaridade mínima: 0.3 (30%)`);
+        console.log(`[CHAT] Query: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`);
 
-        // Extrai contexto relevante baseado na mensagem do usuário
-        const relevantContext = extractRelevantContext(message, fullText);
+        const similarChunks = await searchSimilarChunks(
+            message,
+            conversation.process_id,
+            SEMANTIC_SEARCH_LIMIT,
+            0.3 // Threshold reduzido
+        );
+
+        if (similarChunks.length === 0) {
+            throw new Error(
+                `Nenhum trecho similar encontrado nos documentos para sua pergunta. ` +
+                `(${embeddingStats.totalChunks} trechos em ${embeddingStats.withEmbedding} PDFs disponíveis). ` +
+                `Dica: Tente usar termos mais genéricos ou reformular a pergunta de forma diferente. ` +
+                `O sistema busca por similaridade semântica, não por palavras exatas.`
+            );
+        }
+
+        // Monta o contexto relevante a partir dos chunks encontrados
+        // Limita o total de palavras para não exceder o limite do modelo
+        let relevantContext = '';
+        let totalWords = 0;
+
+        for (const chunk of similarChunks) {
+            const chunkText = `\n\n=== DOCUMENTO: ${chunk.filename} (Similaridade: ${(chunk.similarity * 100).toFixed(1)}%) ===\n\n${chunk.text}`;
+            const chunkWords = chunkText.split(/\s+/).length;
+
+            if (totalWords + chunkWords <= MAX_CONTEXT_WORDS) {
+                relevantContext += chunkText;
+                totalWords += chunkWords;
+            } else {
+                // Adiciona parcialmente se ainda houver espaço
+                const remainingWords = MAX_CONTEXT_WORDS - totalWords;
+                if (remainingWords > 100) { // Só adiciona se houver espaço significativo
+                    const truncatedText = chunk.text.split(/\s+/).slice(0, remainingWords).join(' ');
+                    relevantContext += `\n\n=== DOCUMENTO: ${chunk.filename} (Similaridade: ${(chunk.similarity * 100).toFixed(1)}%) ===\n\n${truncatedText}...`;
+                }
+                break;
+            }
+        }
+
+        console.log(`[CHAT] Contexto montado: ${similarChunks.length} chunks, ${totalWords} palavras`);
 
         // Informações do processo
         const processInfo = `Informações do Processo:\n- Nome: ${conversation.process_name}\n- Advogado: ${conversation.lawyer || 'Não especificado'}\n- Réus: ${conversation.defendants ? conversation.defendants.join(', ') : 'Não especificados'}\n`;
@@ -351,7 +290,7 @@ INSTRUÇÕES IMPORTANTES:
 
 ${processInfo}
 
-CONTEXTO RELEVANTE DOS DOCUMENTOS:
+CONTEXTO RELEVANTE DOS DOCUMENTOS (selecionado por busca semântica):
 ${relevantContext}`;
 
         // Prepara as mensagens para a API da OpenAI
@@ -364,10 +303,10 @@ ${relevantContext}`;
         ];
 
         // Chama a API da OpenAI
-        console.log(`Enviando mensagem para OpenAI (conversa ${conversationId})...`);
+        console.log(`[CHAT] Enviando mensagem para OpenAI (conversa ${conversationId})...`);
 
         const completion = await openai.chat.completions.create({
-            model: 'gpt-5-nano',
+            model: 'gpt-5-mini',
             messages: messages,
         });
 
@@ -385,7 +324,7 @@ ${relevantContext}`;
 
         await client.query('COMMIT');
 
-        console.log(`Resposta gerada com sucesso para conversa ${conversationId}`);
+        console.log(`[CHAT] Resposta gerada com sucesso para conversa ${conversationId}`);
 
         return {
             userMessage,
@@ -394,25 +333,21 @@ ${relevantContext}`;
             model: completion.model
         };
 
-    } 
-    catch (error) 
-    {
+    }
+    catch (error) {
         await client.query('ROLLBACK');
-        console.error(`Erro ao enviar mensagem na conversa ${conversationId}:`, error);
+        console.error(`[CHAT] Erro ao enviar mensagem na conversa ${conversationId}:`, error);
         throw error;
-    } 
-    finally 
-    {
+    }
+    finally {
         client.release();
     }
 }
 
-export async function getMessages({ conversationId, userId, limit = 50, offset = 0 }) 
-{
+export async function getMessages({ conversationId, userId, limit = 50, offset = 0 }) {
     const client = await pool.connect();
 
-    try 
-    {
+    try {
         // Verifica se a conversa pertence ao usuário
         const convResult = await client.query(
             'SELECT id FROM process_conversations WHERE id = $1 AND user_id = $2',
@@ -435,9 +370,8 @@ export async function getMessages({ conversationId, userId, limit = 50, offset =
 
         return result.rows;
 
-    } 
-    finally 
-    {
+    }
+    finally {
         client.release();
     }
 }

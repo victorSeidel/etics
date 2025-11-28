@@ -2,6 +2,9 @@ import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { FileText, Sparkles, Clock, Shield, Check, Zap, Star, ArrowRight } from "lucide-react";
 
+import { Logo } from "@/components/Logo"
+import { Footer } from "@/components/Footer"
+
 const Landing = () => {
     const navigate = useNavigate();
 
@@ -11,13 +14,7 @@ const Landing = () => {
             <header className="border-b border-border/40 backdrop-blur-lg bg-background/95 sticky top-0 z-50">
                 <div className="container mx-auto px-6 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="relative">
-                            <FileText className="h-7 w-7 text-accent" />
-                            <div className="absolute -top-1 -right-1 w-2 h-2 bg-primary rounded-full"></div>
-                        </div>
-                        <span className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                            ETICS
-                        </span>
+                        <Logo />
                     </div>
                     <nav className="hidden md:flex items-center gap-8">
                         <a href="#features" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors duration-200">
@@ -170,7 +167,7 @@ const Landing = () => {
                                 period: "sempre gratuito",
                                 description: "Perfeito para conhecer a plataforma",
                                 features: [
-                                    "1 análise por mês",
+                                    "1 crédito por mês",
                                     "Suporte básico",
                                 ],
                                 buttonVariant: "outline" as "accent" | "outline" | "link" | "default" | "destructive" | "secondary" | "ghost",
@@ -180,10 +177,10 @@ const Landing = () => {
                             {
                                 name: "Básico",
                                 price: "R$ 97",
-                                period: "por ano",
+                                period: "por mês",
                                 description: "Ideal para advogados autônomos",
                                 features: [
-                                    "5 análises por mês",
+                                    "10 créditos por mês",
                                     "Suporte prioritário",
                                 ],
                                 buttonVariant: "accent" as "accent" | "outline" | "link" | "default" | "destructive" | "secondary" | "ghost",
@@ -192,11 +189,11 @@ const Landing = () => {
                             },
                             {
                                 name: "Profissional",
-                                price: "R$ 397",
+                                price: "R$ 597",
                                 period: "por ano",
                                 description: "Para escritórios em crescimento",
                                 features: [
-                                    "10 análises por mês",
+                                    "120 créditos por ano",
                                     "Suporte dedicado",
                                 ],
                                 buttonVariant: "outline" as "accent" | "outline" | "link" | "default" | "destructive" | "secondary" | "ghost",
@@ -278,27 +275,7 @@ const Landing = () => {
                 </div>
             </section>
 
-            {/* Footer */}
-            <footer className="border-t border-border/40 bg-muted/20">
-                <div className="container mx-auto px-6 py-12">
-                    <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-                        <div className="flex items-center gap-3">
-                            <FileText className="h-6 w-6 text-accent" />
-                            <span className="text-lg font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                                ETICS
-                            </span>
-                        </div>
-                        <div className="flex flex-wrap justify-center gap-6 text-sm text-muted-foreground">
-                            <a href="#" className="hover:text-foreground transition-colors">Termos de Uso</a>
-                            <a href="#" className="hover:text-foreground transition-colors">Privacidade</a>
-                            <a href="#" className="hover:text-foreground transition-colors">Contato</a>
-                        </div>
-                        <p className="text-sm text-muted-foreground text-center">
-                            © 2025 ETICS. Transformando a análise jurídica com inteligência artificial.
-                        </p>
-                    </div>
-                </div>
-            </footer>
+            <Footer/>
         </div>
     );
 };

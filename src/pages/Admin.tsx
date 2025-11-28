@@ -2,8 +2,12 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@/hooks/use-user";
 
-import { FileText, LogOut, Users, FileText as FileIcon, ArrowLeft, Save, X, BarChart3, CreditCard, Edit, Trash2, DollarSign, Activity, AlertTriangle, CheckCircle, 
-    Clock, UserCheck, Zap } from "lucide-react";
+import {
+    Users, FileText as FileIcon, ArrowLeft, Save, X, BarChart3, CreditCard, Edit, Trash2, DollarSign, Activity, AlertTriangle, CheckCircle,
+    Clock, UserCheck, Zap
+} from "lucide-react";
+
+import { Header } from "@/components/Header";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -88,8 +92,7 @@ interface UserStats {
     last_activity: string;
 }
 
-const Admin = () => 
-{
+const Admin = () => {
     const { API_URL, user, handleLogout } = useUser();
     const navigate = useNavigate();
 
@@ -122,26 +125,26 @@ const Admin = () =>
     const [isEditingUser, setIsEditingUser] = useState(false);
     const [currentUser, setCurrentUser] = useState<Partial<User>>({});
     const [savingUser, setSavingUser] = useState(false);
+    const [isAddCreditDialogOpen, setIsAddCreditDialogOpen] = useState(false);
+    const [creditAmount, setCreditAmount] = useState(0);
+    const [addingCredits, setAddingCredits] = useState(false);
+    const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
 
-    useEffect(() => 
-    {
-        const checkRole = async () => 
-        {
+    useEffect(() => {
+        const checkRole = async () => {
             if (!user) return;
 
-            if (user.role !== "admin") { navigate("/apps/etics/processes"); return; }
+            if (user.role !== "admin") { navigate("/apps/analise-de-processos/processes"); return; }
         };
 
         if (user) checkRole();
     }, [user, navigate]);
 
-    useEffect(() => 
-    {
+    useEffect(() => {
         fetchAllData();
     }, [API_URL]);
 
-    function normalizeArray<T>(data: any, key?: string): T[] 
-    {
+    function normalizeArray<T>(data: any, key?: string): T[] {
         if (!data) return [];
         if (Array.isArray(data)) return data;
         if (data.data && Array.isArray(data.data)) return data.data;
@@ -150,10 +153,8 @@ const Admin = () =>
         return [data];
     }
 
-    async function fetchAllData() 
-    {
-        try 
-        {
+    async function fetchAllData() {
+        try {
             const token = localStorage.getItem('token');
             const headers = { Authorization: `Bearer ${token}` };
 
@@ -199,18 +200,15 @@ const Admin = () =>
             setPromptGeneralAnalysis(promptGeneralAnalysisResult);
             setPromptFocusedAnalysis(promptFocusedAnalysisResult);
 
-        } 
-        catch (error) 
-        {
+        }
+        catch (error) {
             console.error('Erro ao carregar dados:', error);
             toast.error('Erro ao carregar dados do sistema');
         }
     }
 
-    function calculateUserStats(users: User[], processes: Process[], analyses: ProcessAnalysis[], subscriptions: Subscription[]) 
-    {
-        const stats: UserStats[] = users.map(user => 
-        {
+    function calculateUserStats(users: User[], processes: Process[], analyses: ProcessAnalysis[], subscriptions: Subscription[]) {
+        const stats: UserStats[] = users.map(user => {
             const userProcesses = processes.filter(p => p.userId === user.id);
             const userAnalyses = analyses.filter(a => a.userId === user.id);
             const userSubscription = subscriptions.find(s => s.user_id === user.id);
@@ -239,50 +237,44 @@ const Admin = () =>
         setIsUserDialogOpen(true);
     };
 
-    const handleSaveUser = async () => 
-    {
+    const handleSaveUser = async () => {
         setSavingUser(true);
 
-        try 
-        {
+        try {
             const token = localStorage.getItem('token');
             const method = isEditingUser ? 'PUT' : 'POST';
             const url = isEditingUser ? `${API_URL}/api/users/${currentUser.id}` : `${API_URL}/api/users`;
 
-            const response = await fetch(url, 
-            {
-                method,
-                headers: 
+            const response = await fetch(url,
                 {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify(currentUser)
-            });
+                    method,
+                    headers:
+                    {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(currentUser)
+                });
 
             if (!response.ok) throw new Error('Erro ao salvar usuário');
 
             toast.success(isEditingUser ? 'Usuário atualizado com sucesso' : 'Usuário criado com sucesso');
             setIsUserDialogOpen(false);
             fetchAllData();
-        } 
-        catch (error) 
-        {
+        }
+        catch (error) {
             console.error('Erro ao salvar usuário:', error);
             toast.error('Erro ao salvar usuário');
-        } 
-        finally 
-        {
+        }
+        finally {
             setSavingUser(false);
         }
     };
 
-    const handleDeleteUser = async (userId: number) => 
-    {
+    const handleDeleteUser = async (userId: number) => {
         if (!confirm('Tem certeza que deseja excluir este usuário?')) return;
 
-        try 
-        {
+        try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${API_URL}/api/users/${userId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
 
@@ -290,40 +282,68 @@ const Admin = () =>
 
             toast.success('Usuário excluído com sucesso');
             fetchAllData();
-        } 
-        catch (error) 
-        {
+        }
+        catch (error) {
             console.error('Erro ao excluir usuário:', error);
             toast.error('Erro ao excluir usuário');
         }
     };
 
-    const handleEditGeneral = () => 
-    {
+    const handleOpenAddCredits = (userId: number) => {
+        setSelectedUserId(userId);
+        setCreditAmount(0);
+        setIsAddCreditDialogOpen(true);
+    };
+
+    const handleAddCredits = async () => {
+        if (!selectedUserId || creditAmount <= 0) return;
+
+        setAddingCredits(true);
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/api/users/${selectedUserId}/credits/add`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ amount: creditAmount })
+            });
+
+            if (!response.ok) throw new Error('Erro ao adicionar créditos');
+
+            toast.success('Créditos adicionados com sucesso');
+            setIsAddCreditDialogOpen(false);
+            fetchAllData();
+        } catch (error) {
+            console.error('Erro ao adicionar créditos:', error);
+            toast.error('Erro ao adicionar créditos');
+        } finally {
+            setAddingCredits(false);
+        }
+    };
+
+    const handleEditGeneral = () => {
         setTempPromptGeneral(promptGeneralAnalysis);
         setIsEditingGeneral(true);
     };
 
-    const handleEditFocused = () => 
-    {
+    const handleEditFocused = () => {
         setTempPromptFocused(promptFocusedAnalysis);
         setIsEditingFocused(true);
     };
 
-    const handleCancelGeneral = () => 
-    {
+    const handleCancelGeneral = () => {
         setIsEditingGeneral(false);
         setTempPromptGeneral('');
     };
 
-    const handleCancelFocused = () => 
-    {
+    const handleCancelFocused = () => {
         setIsEditingFocused(false);
         setTempPromptFocused('');
     };
 
-    const handleSaveGeneral = async () => 
-    {
+    const handleSaveGeneral = async () => {
         setSavingGeneral(true);
         try {
             const token = localStorage.getItem('token');
@@ -351,8 +371,7 @@ const Admin = () =>
         }
     };
 
-    const handleSaveFocused = async () => 
-    {
+    const handleSaveFocused = async () => {
         setSavingFocused(true);
         try {
             const token = localStorage.getItem('token');
@@ -388,7 +407,11 @@ const Admin = () =>
             active: { variant: "default", icon: CheckCircle },
             canceled: { variant: "secondary", icon: X },
             past_due: { variant: "destructive", icon: AlertTriangle },
-            pending: { variant: "secondary", icon: Clock }
+            pending: { variant: "secondary", icon: Clock },
+            gerando: { variant: "secondary", icon: Clock },
+            concluida: { variant: "default", icon: CheckCircle },
+            erro: { variant: "destructive", icon: AlertTriangle },
+            processando: { variant: "secondary", icon: Clock }
         };
 
         const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.processing;
@@ -404,32 +427,27 @@ const Admin = () =>
 
     const formatDate = (dateString: string) => { return new Date(dateString).toLocaleDateString('pt-BR'); };
     const formatDateTime = (dateString: string) => { return new Date(dateString).toLocaleString('pt-BR'); };
-    const formatCurrency = (value: number) =>  { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value); };
+    const formatCurrency = (value: number) => { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value); };
 
-    const filteredProcesses = processes.filter(process => 
-    {
+    const filteredProcesses = processes.filter(process => {
         const matchesSearch = (process?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
             || (process?.lawyer || '').toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === 'all' || process.status === statusFilter;
         const matchesUser = userFilter === 'all' || process.userId.toString() === userFilter;
 
         let matchesDate = true;
-        if (dateFilter !== 'all') 
-        {
+        if (dateFilter !== 'all') {
             const processDate = new Date(process.createdAt);
             const now = new Date();
 
-            if (dateFilter === 'today') 
-            {
+            if (dateFilter === 'today') {
                 matchesDate = processDate.toDateString() === now.toDateString();
-            } 
-            else if (dateFilter === 'week') 
-            {
+            }
+            else if (dateFilter === 'week') {
                 const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
                 matchesDate = processDate >= weekAgo;
-            } 
-            else if (dateFilter === 'month') 
-            {
+            }
+            else if (dateFilter === 'month') {
                 const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
                 matchesDate = processDate >= monthAgo;
             }
@@ -438,12 +456,29 @@ const Admin = () =>
         return matchesSearch && matchesStatus && matchesUser && matchesDate;
     });
 
+    const filteredUsers = users.filter(user =>
+        (user.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (user.email || '').toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const filteredAnalyses = analyses.filter(analysis => {
+        const matchesSearch = (analysis.type || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (analysis.focusTarget || '').toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesUser = userFilter === 'all' || analysis.userId.toString() === userFilter;
+        return matchesSearch && matchesUser;
+    });
+
+    const filteredSubscriptions = subscriptions.filter(sub => {
+        const user = users.find(u => u.id === sub.user_id);
+        return (user?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (user?.email || '').toLowerCase().includes(searchTerm.toLowerCase());
+    });
+
     const totalUsers = users.length;
     const totalProcesses = processes.length;
     const totalAnalyses = analyses.length;
     const activeSubscriptions = subscriptions.filter(s => s.status === 'active').length;
-    const totalRevenue = subscriptions.reduce((sum, sub) => 
-    {
+    const totalRevenue = subscriptions.reduce((sum, sub) => {
         const plan = plans.find(p => p.id === sub.plan_id);
         if (!plan) return sum;
         return sum + (sub.billing_cycle === 'monthly' ? plan.price_monthly : plan.price_yearly);
@@ -454,36 +489,7 @@ const Admin = () =>
 
     return (
         <div className="min-h-screen bg-background">
-            <header className="border-b border-border bg-card">
-                <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-8">
-                        <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/apps/etics/dashboard")}>
-                            <FileText className="h-6 w-6 text-accent" />
-                            <span className="text-xl font-semibold">ETICS</span>
-                        </div>
-                        <nav className="hidden md:flex items-center gap-6">
-                            <button
-                                onClick={() => navigate("/apps/etics/processes")}
-                                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                                Processos
-                            </button>
-                            <button
-                                onClick={() => navigate("/apps/etics/admin")}
-                                className="text-sm font-medium text-foreground hover:text-primary transition-colors"
-                            >
-                                Admin
-                            </button>
-                        </nav>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <Badge className="bg-accent text-accent-foreground">ADMIN</Badge>
-                        <Button variant="ghost" size="icon" onClick={handleLogout}>
-                            <LogOut className="h-4 w-4" />
-                        </Button>
-                    </div>
-                </div>
-            </header>
+            <Header />
 
             <main className="container mx-auto px-6 py-8">
                 <Button variant="ghost" className="mb-6 gap-2" onClick={() => navigate("/apps")}>
@@ -584,6 +590,14 @@ const Admin = () =>
                                             Crie, edite e gerencie todos os usuários da plataforma
                                         </CardDescription>
                                     </div>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            placeholder="Buscar usuários..."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            className="w-[200px]"
+                                        />
+                                    </div>
                                 </div>
                             </CardHeader>
                             <CardContent>
@@ -593,13 +607,13 @@ const Admin = () =>
                                             <TableHead>Nome</TableHead>
                                             <TableHead>Email</TableHead>
                                             <TableHead>Cargo</TableHead>
-                                            <TableHead>Processos</TableHead>
+                                            <TableHead>Créditos</TableHead>
                                             <TableHead>Status</TableHead>
                                             <TableHead>Ações</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {users.map((user) => (
+                                        {filteredUsers.map((user) => (
                                             <TableRow key={user.id}>
                                                 <TableCell className="font-medium">{user.name}</TableCell>
                                                 <TableCell>{user.email}</TableCell>
@@ -609,7 +623,17 @@ const Admin = () =>
                                                     </Badge>
                                                 </TableCell>
                                                 <TableCell>
-                                                    {processes.filter(p => p.userId === user.id).length}
+                                                    <div className="flex items-center gap-2">
+                                                        <span>{user.credits || 0}</span>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-6 w-6 p-0"
+                                                            onClick={() => handleOpenAddCredits(user.id)}
+                                                        >
+                                                            <DollarSign className="h-3 w-3" />
+                                                        </Button>
+                                                    </div>
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant="default" className="bg-green-500">
@@ -724,9 +748,9 @@ const Admin = () =>
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="all">Todos</SelectItem>
-                                            <SelectItem value="processing">Processando</SelectItem>
-                                            <SelectItem value="completed">Concluído</SelectItem>
-                                            <SelectItem value="error">Erro</SelectItem>
+                                            <SelectItem value="processando">Processando</SelectItem>
+                                            <SelectItem value="concluido">Concluído</SelectItem>
+                                            <SelectItem value="erro">Erro</SelectItem>
                                         </SelectContent>
                                     </Select>
                                     <Select value={dateFilter} onValueChange={setDateFilter}>
@@ -752,6 +776,7 @@ const Admin = () =>
                                             <TableHead>Progresso</TableHead>
                                             <TableHead>Data</TableHead>
                                             <TableHead>Status</TableHead>
+                                            <TableHead>Ações</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -778,6 +803,15 @@ const Admin = () =>
                                                 </TableCell>
                                                 <TableCell>{formatDate(process.createdAt)}</TableCell>
                                                 <TableCell>{getStatusBadge(process.status)}</TableCell>
+                                                <TableCell>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => navigate(`/apps/analise-de-processos/processes/${process.id}`)}
+                                                    >
+                                                        Ver
+                                                    </Button>
+                                                </TableCell>
                                             </TableRow>
                                         ))}
                                     </TableBody>
@@ -796,6 +830,28 @@ const Admin = () =>
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
+                                <div className="flex flex-wrap gap-4 mb-6">
+                                    <div className="flex-1 min-w-[200px]">
+                                        <Input
+                                            placeholder="Buscar análises..."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                        />
+                                    </div>
+                                    <Select value={userFilter} onValueChange={setUserFilter}>
+                                        <SelectTrigger className="w-[200px]">
+                                            <SelectValue placeholder="Filtrar por usuário" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">Todos os usuários</SelectItem>
+                                            {users.map(user => (
+                                                <SelectItem key={user.id} value={user.id.toString()}>
+                                                    {user.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
@@ -807,10 +863,11 @@ const Admin = () =>
                                             <TableHead>Modelo</TableHead>
                                             <TableHead>Data</TableHead>
                                             <TableHead>Status</TableHead>
+                                            <TableHead>Ações</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {analyses.map((analysis) => (
+                                        {filteredAnalyses.map((analysis) => (
                                             <TableRow key={analysis.id}>
                                                 <TableCell className="font-medium">
                                                     {processes.find(p => p.id === analysis.processId)?.name || 'N/A'}
@@ -825,22 +882,28 @@ const Admin = () =>
                                                 </TableCell>
                                                 <TableCell>
                                                     <div className="flex flex-col">
-                                                        <span className="text-sm">
-                                                            {analysis.focusTarget || '-'}
-                                                        </span>
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {analysis.focusType}
-                                                        </span>
+                                                        {analysis.focusTarget && (
+                                                            <span className="text-sm font-medium">{analysis.focusTarget}</span>
+                                                        )}
+                                                        {analysis.focusType && (
+                                                            <span className="text-xs text-muted-foreground capitalize">{analysis.focusType}</span>
+                                                        )}
+                                                        {!analysis.focusTarget && <span className="text-muted-foreground">-</span>}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell>
-                                                    {analysis.tokensUsed?.toLocaleString() || '0'}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant="outline">{analysis.modelUsed}</Badge>
-                                                </TableCell>
-                                                <TableCell>{formatDateTime(analysis.createdAt)}</TableCell>
+                                                <TableCell>{analysis.tokensUsed}</TableCell>
+                                                <TableCell>{analysis.modelUsed}</TableCell>
+                                                <TableCell>{formatDate(analysis.createdAt)}</TableCell>
                                                 <TableCell>{getStatusBadge(analysis.status)}</TableCell>
+                                                <TableCell>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => navigate(`/apps/analise-de-processos/processes/${analysis.processId}`)}
+                                                    >
+                                                        Ver
+                                                    </Button>
+                                                </TableCell>
                                             </TableRow>
                                         ))}
                                     </TableBody>
@@ -964,7 +1027,7 @@ const Admin = () =>
                                     <div className="p-4 border rounded-lg">
                                         <h3 className="font-medium mb-2">Prompt de Análise Focada</h3>
                                         <p className="text-xs text-muted-foreground mb-3">
-                                            Use <code className="bg-muted px-1 py-0.5 rounded">{'{FOCUS_TARGET}'}</code> para o nome do advogado/réu e <code className="bg-muted px-1 py-0.5 rounded">{'{FOCUS_TYPE}'}</code> para o tipo.
+                                            Use <code className="bg-muted px-1 py-0.5 rounded">{'{FOCUS_ADVOGADO}'}</code> para o nome do advogado e <code className="bg-muted px-1 py-0.5 rounded">{'{FOCUS_REU}'}</code> para o réu.
                                         </p>
                                         {isEditingFocused ? (
                                             <div className="space-y-3">
@@ -1154,6 +1217,40 @@ const Admin = () =>
                         </Button>
                         <Button onClick={handleSaveUser} disabled={savingUser}>
                             {savingUser ? 'Salvando...' : 'Salvar'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog para Adicionar Créditos */}
+            <Dialog open={isAddCreditDialogOpen} onOpenChange={setIsAddCreditDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Adicionar Créditos</DialogTitle>
+                        <DialogDescription>
+                            Adicione créditos para o usuário selecionado.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                        <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="credits" className="text-right">
+                                Quantidade
+                            </Label>
+                            <Input
+                                id="credits"
+                                type="number"
+                                value={creditAmount}
+                                onChange={(e) => setCreditAmount(parseInt(e.target.value))}
+                                className="col-span-3"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsAddCreditDialogOpen(false)}>
+                            Cancelar
+                        </Button>
+                        <Button onClick={handleAddCredits} disabled={addingCredits}>
+                            {addingCredits ? 'Adicionando...' : 'Adicionar'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

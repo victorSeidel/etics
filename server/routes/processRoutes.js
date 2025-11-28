@@ -4,7 +4,8 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { pool } from '../db.js';
-import { addPdfToQueue, getJobStatus } from '../services/queueService.js';
+import { addPdfToQueue } from '../services/queueService.js';
+import format from 'pg-format';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,40 +16,27 @@ const uploadDir = path.join(__dirname, '..', 'uploads');
 await fs.mkdir(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
-    destination: async (req, file, cb) => 
-    {
-        const processDir = path.join(uploadDir, req.body.processId || 'temp');
+    destination: async (req, file, cb) => {
+        const processDir = path.join(uploadDir, req.params.id || 'temp');
         await fs.mkdir(processDir, { recursive: true });
         cb(null, processDir);
     },
-    filename: (req, file, cb) => 
-    {
+    filename: (req, file, cb) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         cb(null, uniqueSuffix + '-' + file.originalname);
     }
 });
+const fileFilter = (req, file, cb) => { if (file.mimetype === 'application/pdf') cb(null, true); else cb(new Error('Apenas PDFs permitidos'), false); };
+const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024, files: 10 }, fileFilter });
 
-const upload = multer({
-    storage,
-    limits: { fileSize: 1024 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => 
-    {
-        if (file.mimetype === 'application/pdf') cb(null, true);
-        else cb(new Error('Apenas arquivos PDF são permitidos'));
-    }
-});
-
-// POST /api/processes - Criar novo processo
 router.post('/', async (req, res) => {
     const client = await pool.connect();
 
-    try 
-    {
+    try {
         const { userId, name, lawyer, defendants } = req.body;
 
         // Validação
-        if (!userId || !name) 
-        {
+        if (!userId || !name) {
             return res.status(400).json({ error: 'userId e name são obrigatórios' });
         }
 
@@ -56,7 +44,7 @@ router.post('/', async (req, res) => {
         const userResult = await client.query(`SELECT credits_available FROM subscriptions WHERE user_id = $1 AND status = 'active'`, [userId]);
 
         if (userResult.rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado' });
-        if (userResult.rows[0].credits < 1) return res.status(400).json({ error: 'Créditos insuficientes' });
+        if (userResult.rows[0].credits_available <= 0) return res.status(400).json({ error: 'Créditos insuficientes' });
 
         // Cria o processo
         const processResult = await client.query(`INSERT INTO processes (user_id, name, lawyer, defendants, status, progress)
@@ -80,19 +68,16 @@ router.post('/', async (req, res) => {
             }
         });
 
-    } 
-    catch (error) 
-    {
+    }
+    catch (error) {
         console.error('Erro ao criar processo:', error);
         res.status(500).json({ error: 'Erro ao criar processo' });
-    } 
-    finally 
-    {
+    }
+    finally {
         client.release();
     }
 });
 
-// POST /api/processes/:id/upload - Upload de múltiplos PDFs
 router.post('/:id/upload', upload.array('pdfs', 10), async (req, res) => {
     const client = await pool.connect();
 
@@ -104,11 +89,7 @@ router.post('/:id/upload', upload.array('pdfs', 10), async (req, res) => {
             return res.status(400).json({ error: 'Nenhum arquivo enviado' });
         }
 
-        // Verifica se o processo existe
-        const processResult = await client.query(
-            'SELECT * FROM processes WHERE id = $1',
-            [processId]
-        );
+        const processResult = await client.query('SELECT id, user_id FROM processes WHERE id = $1', [processId]);
 
         if (processResult.rows.length === 0) {
             return res.status(404).json({ error: 'Processo não encontrado' });
@@ -116,103 +97,189 @@ router.post('/:id/upload', upload.array('pdfs', 10), async (req, res) => {
 
         const process = processResult.rows[0];
 
-        // Verifica se usuário tem créditos suficientes
-        const userResult = await client.query('SELECT credits_available FROM subscriptions WHERE user_id = $1', [process.user_id]);
-
-        if (userResult.rows[0].credits < files.length) {
-            // Remove arquivos enviados
-            for (const file of files) {
-                await fs.unlink(file.path).catch(() => {});
-            }
-            return res.status(400).json({ error: 'Créditos insuficientes para processar todos os PDFs' });
-        }
-
         await client.query('BEGIN');
 
-        // Deduz créditos
-        await client.query(
-            'UPDATE subscriptions SET credits_available = credits_available - 1 WHERE user_id = $1',
-            [process.user_id]
-        );
+        // Calcular tamanho total atual dos arquivos do processo
+        const currentSizeResult = await client.query('SELECT COALESCE(SUM(file_size), 0) as total_size FROM process_pdfs WHERE process_id = $1', [processId]);
+        const currentTotalSize = parseInt(currentSizeResult.rows[0].total_size);
 
-        await client.query(
-            'UPDATE subscriptions SET credits_used = credits_used + 1 WHERE user_id = $1',
-            [process.user_id]
-        );
+        // Calcular tamanho dos novos arquivos
+        const newFilesSize = files.reduce((acc, file) => acc + file.size, 0);
 
-        // Insere PDFs no banco de dados e adiciona à fila
-        const uploadedPdfs = [];
+        // Constante: 1 crédito a cada 500MB
+        const BYTES_PER_CREDIT = 500 * 1024 * 1024;
 
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
+        // Calcular créditos necessários
+        const currentCredits = Math.ceil(currentTotalSize / BYTES_PER_CREDIT);
+        const newTotalSize = currentTotalSize + newFilesSize;
+        // Se o tamanho total for 0 (primeiro upload e arquivo vazio? improvável, mas evita 0 créditos se for o caso de lógica futura), 
+        // mas Math.ceil(0) é 0. Se tivermos 1 byte, Math.ceil(small / big) = 1.
+        // O mínimo deve ser 1 crédito se houver qualquer arquivo? 
+        // A regra é "1 crédito a cada 500mb". 
+        // Se total < 500mb -> 1 crédito.
+        // Se total = 0 (novo processo), currentCredits = 0.
+        // Se upload 10mb -> newTotal = 10mb -> newCredits = 1.
+        // Diff = 1.
+        const newCredits = Math.max(1, Math.ceil(newTotalSize / BYTES_PER_CREDIT));
 
-            // Insere PDF no banco
-            const pdfResult = await client.query(
-                `INSERT INTO process_pdfs
-                 (process_id, filename, original_filename, file_size, file_path, processing_order, status)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'aguardando')
-                 RETURNING *`,
-                [
-                    processId,
-                    file.filename,
-                    file.originalname,
-                    file.size,
-                    file.path,
-                    i
-                ]
-            );
+        // Ajuste: Se for o primeiro upload, currentCredits será 0, então newCredits será pelo menos 1.
+        // Se já tiver arquivos, currentCredits >= 1.
+        const creditsToDeduct = newCredits - (currentTotalSize === 0 ? 0 : Math.ceil(currentTotalSize / BYTES_PER_CREDIT));
 
-            const pdf = pdfResult.rows[0];
+        if (creditsToDeduct > 0) {
+            const userResult = await client.query('SELECT credits_available FROM subscriptions WHERE user_id = $1 FOR UPDATE', [process.user_id]);
+            if (userResult.rows.length === 0 || userResult.rows[0].credits_available < creditsToDeduct) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: `Créditos insuficientes. Necessário: ${creditsToDeduct} crédito(s).` });
+            }
 
-            // Adiciona à fila de processamento
-            const job = await addPdfToQueue({
-                pdfId: pdf.id,
-                processId: processId,
-                filename: pdf.original_filename,
-                pdfPath: pdf.file_path,
-                priority: 5,
-            });
-
-            uploadedPdfs.push({
-                id: pdf.id,
-                filename: pdf.original_filename,
-                fileSize: pdf.file_size,
-                status: pdf.status,
-                jobId: job.id,
-            });
+            await client.query(`UPDATE subscriptions SET credits_available = credits_available - $1, credits_used = credits_used + $1, updated_at = NOW()
+                WHERE user_id = $2`, [creditsToDeduct, process.user_id]);
         }
 
-        // Atualiza contagem total de PDFs no processo
-        await client.query(
-            'UPDATE processes SET total_pdfs = $1, status = $2 WHERE id = $3',
-            [files.length, 'processando', processId]
-        );
+        const fileValues = files.map((file, index) => [
+            processId,
+            file.filename,
+            file.originalname,
+            file.size,
+            file.path,
+            index,
+            'aguardando'
+        ]);
+
+        const pdfInsertQuery = format(`INSERT INTO process_pdfs (process_id, filename, original_filename, file_size, file_path, processing_order, status)
+            VALUES %L RETURNING id, original_filename, file_path`, fileValues);
+
+        const pdfResult = await client.query(pdfInsertQuery);
+        const uploadedPdfs = pdfResult.rows;
+
+        await client.query('UPDATE processes SET total_pdfs = total_pdfs + $1, status = $2, updated_at = NOW() WHERE id = $3', [files.length, 'processando', processId]);
 
         await client.query('COMMIT');
+
+        (async () => {
+            try {
+                const queuePromises = uploadedPdfs.map(pdf => {
+                    return addPdfToQueue({
+                        pdfId: pdf.id,
+                        processId,
+                        filename: pdf.original_filename,
+                        pdfPath: pdf.file_path,
+                        priority: 5
+                    });
+                });
+
+                await Promise.all(queuePromises);
+            }
+            catch (error) {
+                console.error('[BACKGROUND ERRO] Erro ao adicionar à fila:', error);
+            }
+        })();
 
         res.status(200).json({
             success: true,
             processId,
-            uploadedPdfs,
-            message: `${files.length} PDF(s) enviado(s) e adicionado(s) à fila de processamento`,
+            message: `${files.length} PDF(s) enviado(s) e sendo processados em background`
         });
-
-    } catch (error) {
+    }
+    catch (error) {
         await client.query('ROLLBACK');
-        console.error('Erro ao fazer upload de PDFs:', error);
+        console.error('Erro no upload bulk:', error); // Log mais específico
         res.status(500).json({ error: 'Erro ao fazer upload de PDFs' });
-    } finally {
+    }
+    finally {
         client.release();
     }
 });
 
-// GET /api/processes/all - Listar todos os processos
+router.post('/:id/single', upload.single('pdf'), async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const processId = req.params.id;
+
+        const file = req.file;
+        if (!file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+
+        const processResult = await client.query('SELECT id, user_id FROM processes WHERE id = $1 FOR UPDATE', [processId]);
+        if (processResult.rows.length === 0) return res.status(404).json({ error: 'Processo não encontrado' });
+
+        const process = processResult.rows[0];
+
+        await client.query('BEGIN');
+
+        // Calcular tamanho total atual dos arquivos do processo
+        const currentSizeResult = await client.query('SELECT COALESCE(SUM(file_size), 0) as total_size FROM process_pdfs WHERE process_id = $1', [processId]);
+        const currentTotalSize = parseInt(currentSizeResult.rows[0].total_size);
+
+        // Constante: 1 crédito a cada 500MB
+        const BYTES_PER_CREDIT = 500 * 1024 * 1024;
+
+        const newTotalSize = currentTotalSize + file.size;
+
+        // Créditos que deveriam ter sido cobrados até agora (se currentTotalSize for 0, é 0)
+        const creditsChargedSoFar = currentTotalSize === 0 ? 0 : Math.ceil(currentTotalSize / BYTES_PER_CREDIT);
+
+        // Novos créditos totais necessários
+        const newTotalCredits = Math.max(1, Math.ceil(newTotalSize / BYTES_PER_CREDIT));
+
+        const creditsToDeduct = newTotalCredits - creditsChargedSoFar;
+
+        if (creditsToDeduct > 0) {
+            const userResult = await client.query('SELECT credits_available FROM subscriptions WHERE user_id = $1 FOR UPDATE', [process.user_id]);
+            if (userResult.rows.length === 0 || userResult.rows[0].credits_available < creditsToDeduct) {
+                await client.query('ROLLBACK');
+                // Remove o arquivo se falhar por crédito
+                if (req.file && req.file.path) fs.unlink(req.file.path, () => { });
+                return res.status(400).json({ error: `Créditos insuficientes. Necessário: ${creditsToDeduct} crédito(s).` });
+            }
+
+            await client.query(`UPDATE subscriptions SET credits_available = credits_available - $1, credits_used = credits_used + $1, updated_at = NOW()
+                WHERE user_id = $2`, [creditsToDeduct, process.user_id]);
+        }
+
+        const pdfCountResult = await client.query('SELECT COUNT(*) AS total FROM process_pdfs WHERE process_id = $1', [processId]);
+        const pdfCount = parseInt(pdfCountResult.rows[0].total, 10);
+
+        const pdfInsertQuery = `INSERT INTO process_pdfs (process_id, filename, original_filename, file_size, file_path, processing_order, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, original_filename, file_path`;
+
+        const pdfResult = await client.query(pdfInsertQuery, [processId, file.filename, file.originalname, file.size, file.path, pdfCount, 'aguardando']);
+
+        const uploadedPdf = pdfResult.rows[0];
+
+        await client.query(`UPDATE processes SET total_pdfs = total_pdfs + 1, status = 'processando', updated_at = NOW() WHERE id = $1`, [processId]);
+
+        await client.query('COMMIT');
+
+        (async () => {
+            try {
+                await addPdfToQueue({ pdfId: uploadedPdf.id, processId, filename: uploadedPdf.original_filename, pdfPath: uploadedPdf.file_path, priority: 5 });
+            }
+            catch (error) {
+                console.error('[BACKGROUND ERRO] Erro ao adicionar à fila:', error);
+            }
+        })();
+
+        res.status(200).json({ success: true, processId, message: `PDF "${file.originalname}" enviado e sendo processado em background` });
+    }
+    catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Erro no upload single:', error);
+        if (req.file && req.file.path) fs.unlink(req.file.path, (unlinkError) => { if (unlinkError) console.error('Erro ao remover arquivo:', unlinkError); });
+        res.status(500).json({ error: 'Erro ao fazer upload do PDF' });
+    }
+    finally {
+        client.release();
+    }
+});
+
 router.get('/all', async (req, res) => {
     const client = await pool.connect();
 
     try {
 
-        const result = await client.query( `SELECT * FROM processes ORDER BY created_at DESC`);
+        const result = await client.query(`SELECT * FROM processes ORDER BY created_at DESC`);
 
         const processes = result.rows.map(p => ({
             id: p.id,
@@ -239,7 +306,6 @@ router.get('/all', async (req, res) => {
     }
 });
 
-// GET /api/processes - Listar processos do usuário
 router.get('/', async (req, res) => {
     const client = await pool.connect();
 
@@ -255,6 +321,29 @@ router.get('/', async (req, res) => {
             [userId]
         );
 
+        // Fetch tags for all processes
+        const processIds = result.rows.map(p => p.id);
+        const tagsResult = processIds.length > 0 ? await client.query(
+            `SELECT pt.process_id, t.id, t.name, t.color 
+             FROM process_tags pt 
+             JOIN tags t ON pt.tag_id = t.id 
+             WHERE pt.process_id = ANY($1)`,
+            [processIds]
+        ) : { rows: [] };
+
+        // Group tags by process_id
+        const tagsByProcess = {};
+        tagsResult.rows.forEach(row => {
+            if (!tagsByProcess[row.process_id]) {
+                tagsByProcess[row.process_id] = [];
+            }
+            tagsByProcess[row.process_id].push({
+                id: row.id,
+                name: row.name,
+                color: row.color
+            });
+        });
+
         const processes = result.rows.map(p => ({
             id: p.id,
             userId: p.user_id,
@@ -268,6 +357,9 @@ router.get('/', async (req, res) => {
             errorMessage: p.error_message,
             createdAt: p.created_at,
             completedAt: p.completed_at,
+            isArchived: p.is_archived,
+            isFavorite: p.is_favorite,
+            tags: tagsByProcess[p.id] || []
         }));
 
         res.json({ success: true, processes });
@@ -280,7 +372,73 @@ router.get('/', async (req, res) => {
     }
 });
 
-// GET /api/processes/:id - Obter detalhes de um processo
+// Create a new tag
+router.post('/tags', async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const { userId, name, color } = req.body;
+
+        if (!userId || !name) {
+            return res.status(400).json({ error: 'userId e name são obrigatórios' });
+        }
+
+        const result = await client.query(
+            'INSERT INTO tags (user_id, name, color) VALUES ($1, $2, $3) RETURNING *',
+            [userId, name, color || '#000000']
+        );
+
+        const tag = result.rows[0];
+
+        res.status(201).json({
+            success: true,
+            tag: {
+                id: tag.id,
+                name: tag.name,
+                color: tag.color
+            }
+        });
+
+    } catch (error) {
+        console.error('Erro ao criar tag:', error);
+        res.status(500).json({ error: 'Erro ao criar tag' });
+    } finally {
+        client.release();
+    }
+});
+
+// Get all tags for a user
+router.get('/tags', async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const { userId } = req.query;
+
+        if (!userId) {
+            return res.status(400).json({ error: 'userId é obrigatório' });
+        }
+
+        const result = await client.query(
+            'SELECT * FROM tags WHERE user_id = $1 ORDER BY name',
+            [userId]
+        );
+
+        const tags = result.rows.map(t => ({
+            id: t.id,
+            name: t.name,
+            color: t.color
+        }));
+
+        res.json({ success: true, tags });
+
+    } catch (error) {
+        console.error('Erro ao listar tags:', error);
+        res.status(500).json({ error: 'Erro ao listar tags' });
+    } finally {
+        client.release();
+    }
+});
+
 router.get('/:id', async (req, res) => {
     const client = await pool.connect();
 
@@ -319,6 +477,21 @@ router.get('/:id', async (req, res) => {
             completedAt: p.completed_at,
         }));
 
+        // Fetch tags for this process
+        const tagsResult = await client.query(
+            `SELECT t.id, t.name, t.color 
+             FROM process_tags pt 
+             JOIN tags t ON pt.tag_id = t.id 
+             WHERE pt.process_id = $1`,
+            [processId]
+        );
+
+        const tags = tagsResult.rows.map(t => ({
+            id: t.id,
+            name: t.name,
+            color: t.color
+        }));
+
         res.json({
             success: true,
             process: {
@@ -334,6 +507,9 @@ router.get('/:id', async (req, res) => {
                 errorMessage: process.error_message,
                 createdAt: process.created_at,
                 completedAt: process.completed_at,
+                isArchived: process.is_archived,
+                isFavorite: process.is_favorite,
+                tags,
                 pdfs,
             }
         });
@@ -346,7 +522,6 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// GET /api/processes/:id/status - Obter status e progresso em tempo real
 router.get('/:id/status', async (req, res) => {
     const client = await pool.connect();
 
@@ -401,7 +576,6 @@ router.get('/:id/status', async (req, res) => {
     }
 });
 
-// DELETE /api/processes/:id - Deletar processo
 router.delete('/:id', async (req, res) => {
     const client = await pool.connect();
 
@@ -426,7 +600,7 @@ router.delete('/:id', async (req, res) => {
 
         // Deleta arquivos físicos
         for (const pdf of pdfsResult.rows) {
-            await fs.unlink(pdf.file_path).catch(() => {});
+            await fs.unlink(pdf.file_path).catch(() => { });
         }
 
         res.json({ success: true, message: 'Processo deletado com sucesso' });
@@ -439,7 +613,6 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-// GET /api/processes/:processId/pdfs/:pdfId/download - Download do texto extraído
 router.get('/:processId/pdfs/:pdfId/download', async (req, res) => {
     const client = await pool.connect();
 
@@ -474,7 +647,6 @@ router.get('/:processId/pdfs/:pdfId/download', async (req, res) => {
     }
 });
 
-// POST /api/processes/:id/retry - Reprocessar um processo com erro
 router.post('/:id/retry', async (req, res) => {
     const client = await pool.connect();
 
@@ -559,6 +731,107 @@ router.post('/:id/retry', async (req, res) => {
         await client.query('ROLLBACK');
         console.error('Erro ao reprocessar processo:', error);
         res.status(500).json({ error: 'Erro ao reprocessar processo' });
+    } finally {
+        client.release();
+    }
+});
+
+// Toggle archive status
+router.patch('/:id/archive', async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const processId = req.params.id;
+
+        const result = await client.query(
+            'UPDATE processes SET is_archived = NOT is_archived WHERE id = $1 RETURNING is_archived',
+            [processId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Processo não encontrado' });
+        }
+
+        res.json({ success: true, isArchived: result.rows[0].is_archived });
+
+    } catch (error) {
+        console.error('Erro ao arquivar processo:', error);
+        res.status(500).json({ error: 'Erro ao arquivar processo' });
+    } finally {
+        client.release();
+    }
+});
+
+// Toggle favorite status
+router.patch('/:id/favorite', async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const processId = req.params.id;
+
+        const result = await client.query(
+            'UPDATE processes SET is_favorite = NOT is_favorite WHERE id = $1 RETURNING is_favorite',
+            [processId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Processo não encontrado' });
+        }
+
+        res.json({ success: true, isFavorite: result.rows[0].is_favorite });
+
+    } catch (error) {
+        console.error('Erro ao favoritar processo:', error);
+        res.status(500).json({ error: 'Erro ao favoritar processo' });
+    } finally {
+        client.release();
+    }
+});
+
+// Add tag to process
+router.post('/:id/tags', async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const processId = req.params.id;
+        const { tagId } = req.body;
+
+        if (!tagId) {
+            return res.status(400).json({ error: 'tagId é obrigatório' });
+        }
+
+        await client.query(
+            'INSERT INTO process_tags (process_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [processId, tagId]
+        );
+
+        res.json({ success: true, message: 'Tag adicionada ao processo' });
+
+    } catch (error) {
+        console.error('Erro ao adicionar tag ao processo:', error);
+        res.status(500).json({ error: 'Erro ao adicionar tag ao processo' });
+    } finally {
+        client.release();
+    }
+});
+
+// Remove tag from process
+router.delete('/:id/tags/:tagId', async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const { id: processId, tagId } = req.params;
+
+        await client.query(
+            'DELETE FROM process_tags WHERE process_id = $1 AND tag_id = $2',
+            [processId, tagId]
+        );
+
+        res.json({ success: true, message: 'Tag removida do processo' });
+
+    } catch (error) {
+        console.error('Erro ao remover tag do processo:', error);
+        res.status(500).json({ error: 'Erro ao remover tag do processo' });
     } finally {
         client.release();
     }

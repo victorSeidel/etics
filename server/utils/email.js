@@ -4,9 +4,6 @@ const createTransporter = async () =>
 {
     try 
     {
-        console.log('Email user:', process.env.EMAIL_USER);
-        console.log('App password exists:', process.env.EMAIL_APP_PASSWORD);
-
         const transporter = nodemailer.createTransport({
             service: 'gmail',
             auth: {
